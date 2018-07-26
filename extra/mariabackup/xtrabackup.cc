@@ -2339,7 +2339,7 @@ xb_get_copy_action(const char *dflt)
 
 static
 my_bool
-xtrabackup_copy_datafile(fil_node_t* node, uint thread_n, const char *dest_name=0)
+xtrabackup_copy_datafile(fil_node_t* node, uint thread_n, const char *dest_name=0, ulonglong max_size=ULLONG_MAX)
 {
 	char			 dst_name[FN_REFLEN];
 	ds_file_t		*dstfile = NULL;
@@ -2375,7 +2375,7 @@ xtrabackup_copy_datafile(fil_node_t* node, uint thread_n, const char *dest_name=
 	else {
 		read_filter = &rf_bitmap;
 	}
-	res = xb_fil_cur_open(&cursor, read_filter, node, thread_n);
+	res = xb_fil_cur_open(&cursor, read_filter, node, thread_n,max_size);
 	if (res == XB_FIL_CUR_SKIP) {
 		goto skip;
 	} else if (res == XB_FIL_CUR_ERROR) {
@@ -2435,7 +2435,9 @@ xtrabackup_copy_datafile(fil_node_t* node, uint thread_n, const char *dest_name=
 		goto error;
 	}
 
+	mutex_enter(&fil_system->mutex);
 	tablespaces_in_backup[node->space->id] = node_name;
+	mutex_exit(&fil_system->mutex);
 
 	/* close */
 	msg_ts("[%02u]        ...done\n", thread_n);
@@ -3235,7 +3237,7 @@ xb_load_tablespaces()
 	}
 
 	debug_sync_point("xtrabackup_load_tablespaces_pause");
-
+	DBUG_MARIABACKUP_EVENT("after_load_tablespaces", 0);
 	return(DB_SUCCESS);
 }
 
@@ -4354,6 +4356,9 @@ void copy_tablespaces_created_during_backup()
 		iter != tablespaces_in_backup.end(); ++iter) {
 
 		ulint id = iter->first;
+		if (!id)
+			continue;
+
 		const char *name = iter->second.c_str();
 
 		mutex_enter(&fil_system->mutex);
@@ -4369,14 +4374,15 @@ void copy_tablespaces_created_during_backup()
 
 	// Copy new tablespaces
 	for (size_t i = 0; i < new_tablespaces.size(); i++) {
-		xtrabackup_copy_datafile(new_tablespaces[i], 0);
+		xtrabackup_copy_datafile(new_tablespaces[i], 0, 0 /*, UNIV_PAGE_SIZE*FIL_IBD_FILE_INITIAL_SIZE */);
 	}
 
 	// Re-copy recreated (DROP/CREATE under the same name) tablespaces
 	for(size_t i= 0; i< recreated_tablespaces.size(); i++) {
 		std::string dest_name(recreated_tablespaces[i]->space->name);
 		dest_name.append(".new");
-		xtrabackup_copy_datafile(recreated_tablespaces[i], 0, dest_name.c_str());
+		xtrabackup_copy_datafile(recreated_tablespaces[i], 0, 
+			dest_name.c_str()/*, UNIV_PAGE_SIZE*FIL_IBD_FILE_INITIAL_SIZE*/);
 	}
 
 	// mark tablespaces for rename (--prepare will handle it correctly)

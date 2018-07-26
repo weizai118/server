@@ -131,11 +131,12 @@ Open a source file cursor and initialize the associated read filter.
 be skipped and XB_FIL_CUR_ERROR on error. */
 xb_fil_cur_result_t
 xb_fil_cur_open(
-/*============*/
+	/*============*/
 	xb_fil_cur_t*	cursor,		/*!< out: source file cursor */
 	xb_read_filt_t*	read_filter,	/*!< in/out: the read filter */
 	fil_node_t*	node,		/*!< in: source tablespace node */
-	uint		thread_n)	/*!< thread number for diagnostics */
+	uint		thread_n,	/*!< thread number for diagnostics */
+	ulonglong max_file_size)
 {
 	bool	success;
 	int err;
@@ -216,6 +217,9 @@ xb_fil_cur_open(
 #else
 	err = fstat(cursor->file.m_file, &cursor->statinfo);
 #endif
+	if (max_file_size < (ulonglong)cursor->statinfo.st_size) {
+		cursor->statinfo.st_size = (ulonglong)max_file_size;
+	}
 	if (err) {
 		msg("[%02u] mariabackup: error: cannot fstat %s\n",
 		    thread_n, cursor->abs_path);
