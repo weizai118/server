@@ -82,11 +82,12 @@ Open a source file cursor and initialize the associated read filter.
 be skipped and XB_FIL_CUR_ERROR on error. */
 xb_fil_cur_result_t
 xb_fil_cur_open(
-/*============*/
+	/*============*/
 	xb_fil_cur_t*	cursor,		/*!< out: source file cursor */
 	xb_read_filt_t*	read_filter,	/*!< in/out: the read filter */
 	fil_node_t*	node,		/*!< in: source tablespace node */
-	uint		thread_n);	/*!< thread number for diagnostics */
+	uint		thread_n,	/*!< thread number for diagnostics */
+	ulonglong max_file_size = ULLONG_MAX);
 
 /************************************************************************
 Reads and verifies the next block of pages from the source
