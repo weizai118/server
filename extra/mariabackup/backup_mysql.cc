@@ -146,7 +146,7 @@ xb_mysql_connect()
 				opt_user,
 				opt_password,
 				"" /*database*/, opt_port,
-				opt_socket, 0)) {
+				opt_socket, IF_DBUG(CLIENT_MULTI_STATEMENTS,0))) {
 		msg("Failed to connect to MySQL server: %s.\n",
 			mysql_error(connection));
 		mysql_close(connection);
