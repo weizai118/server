@@ -2706,6 +2706,8 @@ static void dbug_mariabackup_event(const char *event,const char *key)
 
 }
 #define DBUG_MARIABACKUP_EVENT(A, B) DBUG_EXECUTE_IF("mariabackup_events", dbug_mariabackup_event(A,B););
+#else
+#define DBUG_MARIABACKUP_EVENT(A,B)
 #endif
 
 /**************************************************************************
@@ -4318,7 +4320,7 @@ void copy_tablespaces_created_during_backup()
 
 	fil_close_all_files();
 	/* Rescan datadir, load tablespaces that were created during backup.*/
-	dberr_t err = enumerate_ibd_files(xb_load_single_table_tablespace);
+	enumerate_ibd_files(xb_load_single_table_tablespace);
 	datafiles_iter_t *it = datafiles_iter_new(fil_system);
 	if (!it)
 		return;
@@ -4395,7 +4397,7 @@ void copy_tablespaces_created_during_backup()
 
 	// mark tablespaces for drop.
 	for (size_t i = 0; i < dropped_tablespaces.size(); i++) {
-		backup_file_printf((dropped_tablespaces[i] + ".del").c_str(), "");
+		backup_file_printf((dropped_tablespaces[i] + ".del").c_str(), "%s","");
 	}
 
 }
@@ -5177,12 +5179,13 @@ static void fix_rename(const char *ibd)
 {
 	std::string ren_file(change_extension(ibd,"ren"));
 
-	char target_ibd[FN_REFLEN + 1] = { 0 };
+	char target_ibd[FN_REFLEN + 1];
 	FILE *f = fopen(ren_file.c_str(), "r");
 	if (!f) {
 		msg("Can not open %s", ren_file.c_str());
 	}
-	fread(target_ibd, 1, FN_REFLEN, f);
+	size_t len = fread(target_ibd, 1, FN_REFLEN, f);
+	target_ibd[len] = 0;
 	fclose(f);
 
 	std::string tmp_ibt;
