@@ -1,0 +1,9 @@
+CREATE TABLE t (a TEXT);
+RESET MASTER;
+INSERT INTO t SET a=repeat('a', 1024);
+FLUSH LOGS;
+SELECT count(*) as two FROM t;
+two
+2
+# Cleanup
+DROP TABLE t;

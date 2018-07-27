@@ -56,7 +56,7 @@ Rpl_filter *binlog_filter= 0;
 
 #define BIN_LOG_HEADER_SIZE	4
 #define PROBE_HEADER_LEN	(EVENT_LEN_OFFSET+4)
-
+#define BINLOG_ROWS_EVENT_ENCODED_FRAGMENTS 2
 
 #define CLIENT_CAPABILITIES	(CLIENT_LONG_PASSWORD | CLIENT_LONG_FLAG | CLIENT_LOCAL_FILES)
 
@@ -71,6 +71,7 @@ ulong bytes_sent = 0L, bytes_received = 0L;
 ulong mysqld_net_retry_count = 10L;
 ulong open_files_limit;
 ulong opt_binlog_rows_event_max_size;
+ulong opt_binlog_rows_event_max_encoded_size;
 uint test_flags = 0; 
 static uint opt_protocol= 0;
 static FILE *result_file;
@@ -1472,6 +1473,13 @@ that may lead to an endless loop.",
    "This value must be a multiple of 256.",
    &opt_binlog_rows_event_max_size, &opt_binlog_rows_event_max_size, 0,
    GET_ULONG, REQUIRED_ARG, UINT_MAX,  256, ULONG_MAX,  0, 256,  0},
+  {"binlog-row-event-max-encoded-size", 0,
+   "The maximum size of base64-encoded rows-event in one BINLOG pseudo-query "
+   "instance. When the computed actual size exceeds the limit "
+   "the BINLOG's argument string is fragmented in two.",
+   &opt_binlog_rows_event_max_encoded_size,
+   &opt_binlog_rows_event_max_encoded_size, 0,
+   GET_ULONG, REQUIRED_ARG, UINT_MAX/4,  256, ULONG_MAX,  0, 256,  0},
   {"verify-binlog-checksum", 'c', "Verify checksum binlog events.",
    (uchar**) &opt_verify_binlog_checksum, (uchar**) &opt_verify_binlog_checksum,
    0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},

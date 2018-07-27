@@ -67,6 +67,100 @@ my_b_copy_to_file(IO_CACHE *cache, FILE *file)
   DBUG_RETURN(0);
 }
 
+/**
+  The same as above but copying is made in steps of the number of
+  fragments, and each step is wrapped with writing to the file @c
+  before_frag and @c after_frag formated strings.
+*/
+int
+my_b_copy_to_file_frag(IO_CACHE *cache, FILE *file,
+                       uint n_frag,
+                       const char* before_frag,
+                       const char* after_frag,
+                       const char* delim,
+                       const char* after_total)
+{
+  size_t bytes_in_cache;
+
+  /*
+    In the following `cache' content is copied into `file'
+    to respect a fragment size. The standard copying by the cache buffer
+    size ('block' in below )therefore is complicated to watch for the current fragment completion
+    and when it's the case the before- and after- actions are fulfilled.
+    To implement that an external 'fragment' loop is added.
+    Also the cache reading state of the intenal loop is kept tracked so
+    when the fragment rotates the reading resumes from a proper position
+    (cache->read_pos + last_block_written).
+  */
+  size_t total_size= my_b_tell(cache);
+  size_t frag_size= total_size / n_frag;
+  size_t last_block_written= 0;
+  size_t total_written= 0;
+  size_t frag_written;
+
+  char *buf;
+
+  DBUG_ENTER("my_b_copy_to_file_frag");
+
+  DBUG_ASSERT(cache->type == WRITE_CACHE);
+
+  /* Memory allocation below reserves 2 decimal digits */
+  if (n_frag > 100)
+       DBUG_RETURN(1);
+
+  /* Reinit the cache to read from the beginning of the cache */
+  if (reinit_io_cache(cache, READ_CACHE, 0L, FALSE, FALSE))
+    DBUG_RETURN(1);
+
+  bytes_in_cache= my_b_bytes_in_cache(cache);
+  /* Allocation is a bit excessive though safe */
+  buf= my_alloca(strlen(before_frag) +  strlen(after_frag) + 16);
+  for (uint i= 0; i < n_frag; i++, total_written += frag_written)
+  {
+       frag_written= 0;
+       sprintf(buf, before_frag, i);
+       my_fwrite(file, (uchar*) buf, strlen(buf), MYF(MY_WME | MY_NABP));
+       do
+       {
+            size_t block_to_write=  (bytes_in_cache + frag_written > frag_size) ?
+                 frag_size - frag_written : bytes_in_cache;
+            if (my_fwrite(file, cache->read_pos + last_block_written,
+                          block_to_write,
+                          MYF(MY_WME | MY_NABP)) == (size_t) -1)
+                 DBUG_RETURN(1);
+            frag_written += block_to_write;
+            if (block_to_write < bytes_in_cache)
+            {
+                 last_block_written= block_to_write;
+                 bytes_in_cache -= last_block_written;
+
+                 DBUG_ASSERT(frag_written <= frag_size);
+
+                 break;
+            }
+            else
+            {
+                 last_block_written= 0;
+            }
+       } while ((bytes_in_cache= my_b_fill(cache)));
+
+       sprintf(buf, after_frag, delim);
+       my_fwrite(file, (uchar*) buf, strlen(buf), MYF(MY_WME | MY_NABP));
+  }
+
+  DBUG_ASSERT(total_written == total_size);
+
+  sprintf(buf, after_total, n_frag, delim);
+  my_fwrite(file, (uchar*) buf, strlen(buf), MYF(MY_WME | MY_NABP));
+  
+  // TODO-10963: in mysqlbinlog output we should reset the user variables to reclaim memory (SET @binlog_fragment_i='')
+
+  my_afree(buf);
+  if(cache->error == -1)
+    DBUG_RETURN(1);
+  DBUG_RETURN(0);
+}
+
 
 my_off_t my_b_append_tell(IO_CACHE* info)
 {

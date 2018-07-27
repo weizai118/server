@@ -1,0 +1,21 @@
+--source include/have_log_bin.inc
+--source include/have_binlog_format_row.inc
+
+--let $MYSQLD_DATADIR= `select @@datadir`
+--let $max_size=1024
+
+CREATE TABLE t (a TEXT);
+# events of interest are guaranteed to stay in 000001 log
+RESET MASTER;
+--eval INSERT INTO t SET a=repeat('a', $max_size)
+FLUSH LOGS;
+
+--exec $MYSQL_BINLOG --binlog-row-event-max-encoded-size=256 $MYSQLD_DATADIR/master-bin.000001 > $MYSQLTEST_VARDIR/tmp/mysqlbinlog.sql
+
+--exec $MYSQL test < $MYSQLTEST_VARDIR/tmp/mysqlbinlog.sql
+
+SELECT count(*) as two FROM t;
+
+--echo # Cleanup
+DROP TABLE t;
+

@@ -4900,6 +4900,27 @@ static inline bool copy_event_cache_to_file_and_reinit(IO_CACHE *cache,
     reinit_io_cache(cache, WRITE_CACHE, 0, FALSE, TRUE);
 }
 
+
+/**
+  The same as above but copying is made in steps of the number of
+  fragments, and each step is wrapped with writing to the file @c
+  before_frag and @c after_frag formated strings.
+*/
+inline bool copy_cache_frag_to_file_and_reinit(IO_CACHE *cache,
+                                               FILE *file,
+                                               uint n_frag,
+                                               const char* before_frag,
+                                               const char* after_frag,
+                                               const char* delim,
+                                               const char* after_total)
+{
+  return         
+    my_b_copy_to_file_frag(cache, file, n_frag, before_frag, after_frag,
+                           delim, after_total) ||
+    reinit_io_cache(cache, WRITE_CACHE, 0, FALSE, TRUE);
+}
+
+
 #ifdef MYSQL_SERVER
 /*****************************************************************************
 

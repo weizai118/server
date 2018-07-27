@@ -2785,15 +2785,13 @@ void Log_event::print_base64(IO_CACHE* file,
 
   if (print_event_info->base64_output_mode != BASE64_OUTPUT_DECODE_ROWS)
   {
+#if 0
+  /* Moved into copy_event_cache_to_file_and_reinit */
     if (my_b_tell(file) == 0)
       my_b_write_string(file, "\nBINLOG '\n");
-
+#endif
     my_b_printf(file, "%s\n", tmp_str);
-
-    if (!more)
-      my_b_printf(file, "'%s\n", print_event_info->delimiter);
   }
-  
   if (print_event_info->verbose)
   {
     Rows_log_event *ev= NULL;
@@ -4833,9 +4831,17 @@ void Start_log_event_v3::print(FILE* file, PRINT_EVENT_INFO* print_event_info)
       print_event_info->base64_output_mode != BASE64_OUTPUT_NEVER &&
       !print_event_info->short_form)
   {
+    /* BINLOG is matched with the delimiter below on the same level */
+    /* TODO-10963: check whether delimiter write removal from Log_event::print_base64()
+       affected more */
     if (print_event_info->base64_output_mode != BASE64_OUTPUT_DECODE_ROWS)
       my_b_printf(&cache, "BINLOG '\n");
+
     print_base64(&cache, print_event_info, FALSE);
+
+    if (print_event_info->base64_output_mode != BASE64_OUTPUT_DECODE_ROWS)
+      my_b_printf(&cache, "'%s\n", print_event_info->delimiter);
+
     print_event_info->printed_fd_event= TRUE;
   }
   DBUG_VOID_RETURN;
@@ -10479,6 +10485,7 @@ void Rows_log_event::pack_info(Protocol *protocol)
 #endif
 
 #ifdef MYSQL_CLIENT
+
 void Rows_log_event::print_helper(FILE *file,
                                   PRINT_EVENT_INFO *print_event_info,
                                   char const *const name)
@@ -10498,7 +10505,25 @@ void Rows_log_event::print_helper(FILE *file,
   if (get_flags(STMT_END_F))
   {
     copy_event_cache_to_file_and_reinit(head, file);
-    copy_event_cache_to_file_and_reinit(body, file);
+    if (print_event_info->base64_output_mode != BASE64_OUTPUT_DECODE_ROWS)
+    {
+      my_off_t body_size= my_b_tell(body);
+      uint n_frag= body_size > opt_binlog_rows_event_max_encoded_size ?
+        BINLOG_ROWS_EVENT_ENCODED_FRAGMENTS : 1;
+      const char* before_frag= n_frag == 1 ?
+        "\nBINLOG '\n" : "\nSET @binlog_fragment_%d='\n";
+      const char* after_frag= "'%s\n";
+      const char* after_total= "\nBINLOG %d, 'binlog_fragment'%s\n";
+
+      copy_cache_frag_to_file_and_reinit(body, file, n_frag,
+                                         before_frag, after_frag,
+                                         print_event_info->delimiter,
+                                         after_total);
+    }
+    else
+    {
+      copy_event_cache_to_file_and_reinit(body, file);
+    }
   }
 }
 #endif
