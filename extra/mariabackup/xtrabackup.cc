@@ -4397,15 +4397,18 @@ void copy_tablespaces_created_during_backup(void)
 
 	// Copy new tablespaces
 	for (size_t i = 0; i < new_tablespaces.size(); i++) {
-		xtrabackup_copy_datafile(new_tablespaces[i], 0, 0 /*, UNIV_PAGE_SIZE*FIL_IBD_FILE_INITIAL_SIZE */);
+		fil_node_t *n = new_tablespaces[i];
+		std::string dest_name(n->space->name);
+		dest_name.append(".new");
+		xtrabackup_copy_datafile(n, 0, dest_name.c_str(), UNIV_PAGE_SIZE);
 	}
 
 	// Re-copy recreated (DROP/CREATE under the same name) tablespaces
 	for(size_t i= 0; i< recreated_tablespaces.size(); i++) {
-		std::string dest_name(recreated_tablespaces[i]->space->name);
+		fil_node_t *n = recreated_tablespaces[i];
+		std::string dest_name(n->space->name);
 		dest_name.append(".new");
-		xtrabackup_copy_datafile(recreated_tablespaces[i], 0, 
-			dest_name.c_str()/*, UNIV_PAGE_SIZE*FIL_IBD_FILE_INITIAL_SIZE*/);
+		xtrabackup_copy_datafile(n, 0,  dest_name.c_str(), UNIV_PAGE_SIZE);
 	}
 
 	// mark tablespaces for rename (--prepare will handle it correctly)
@@ -4931,6 +4934,24 @@ error:
 	return FALSE;
 }
 
+
+std::string change_extension(std::string filename, std::string new_ext) {
+	DBUG_ASSERT(new_ext.size() == 3);
+	std::string new_name(filename);
+	new_name.resize(new_name.size() - new_ext.size());
+	new_name.append(new_ext);
+	return new_name;
+}
+
+
+static void rename_file(std::string from, std::string to) {
+	msg("Renaming %s to %s\n", from.c_str(), to.c_str());
+	if (my_rename(from.c_str(), to.c_str(), MY_WME)) {
+		msg("Cannot rename %s->%s errno %d", from.c_str(), to.c_str(), errno);
+		exit(EXIT_FAILURE);
+	}
+}
+
 /************************************************************************
 Callback to handle datadir entry. Function of this type will be called
 for each entry which matches the mask by xb_process_datadir.
@@ -4941,6 +4962,53 @@ typedef ibool (*handle_datadir_entry_func_t)(
 	const char*	db_name,		/*!<in: database name */
 	const char*	file_name,		/*!<in: file name with suffix */
 	void*		arg);			/*!<in: caller-provided data */
+
+static ibool prepare_new_tablespaces(
+	const char*	data_home_dir,		/*!<in: path to datadir */
+	const char*	db_name,		/*!<in: database name */
+	const char*	file_name,		/*!<in: file name with suffix */
+	void *)
+{
+
+	std::string new_file =  std::string(db_name) + '/' + file_name;
+	/* Find out the size of the new tablespace from the first page*/
+	int fd = open(new_file.c_str(), O_RDWR|O_BINARY);
+	if (fd < 0) {
+		msg("Can't open %s", new_file.c_str());
+		exit(EXIT_FAILURE);
+	}
+#define HEADERSIZE FSP_HEADER_OFFSET + FSP_SIZE + 4
+	byte buf[HEADERSIZE];
+	int bytes = read(fd, buf, HEADERSIZE);
+
+	if (bytes != HEADERSIZE) {
+		msg("Can't fread from %s", new_file.c_str());
+		exit(EXIT_FAILURE);
+	}
+	os_offset_t n_pages = mach_read_from_4(
+		buf + FSP_HEADER_OFFSET + FSP_SIZE);
+	//ut_ad(n_pages >= FIL_IBD_FILE_INITIAL_SIZE);
+	
+	os_offset_t new_size = n_pages * UNIV_PAGE_SIZE;
+	if (new_size) {
+		msg("Extending %s to the size %llu\n", new_file.c_str(),new_size);
+		if (!os_file_set_size(new_file.c_str(),
+			IF_WIN((HANDLE)_get_osfhandle(fd), fd), new_size)) {
+			msg("Could not extend %s", new_file.c_str());
+			exit(EXIT_FAILURE);
+		}
+		close(fd);
+	}
+	std::string ibd_file = change_extension(new_file, "ibd");
+	if (access(ibd_file.c_str(), R_OK) == 0) {
+		if (unlink(ibd_file.c_str())) {
+			msg("Can't remove %s, errno %d", ibd_file.c_str(), errno);
+			exit(EXIT_FAILURE);
+		}
+	}
+	rename_file(new_file, ibd_file);
+	return TRUE;
+}
 
 /************************************************************************
 Callback to handle datadir entry. Deletes entry if it has no matching
@@ -5147,21 +5215,7 @@ store_binlog_info(const char* filename, const char* name, ulonglong pos)
 	return(true);
 }
 
-std::string change_extension(std::string filename, std::string new_ext) {
-	DBUG_ASSERT(new_ext.size() == 3);
-	std::string new_name(filename);
-	new_name.resize(new_name.size() - new_ext.size());
-	new_name.append(new_ext);
-	return new_name;
-}
 
-static void rename_file(std::string from, std::string to) {
-	msg("Renaming %s to %s", from.c_str(), to.c_str());
-	if (my_rename(from.c_str(), to.c_str(), 0)) {
-		msg("Cannot rename %s->%s errno %d", from.c_str(), to.c_str(), errno);
-		exit(EXIT_FAILURE);
-	}
-}
 
 static bool file_exists(std::string name)
 {
@@ -5252,16 +5306,6 @@ static void fix_ddl_in_prepare(const char *dbname, const char *tablename, bool)
 		fix_rename(ibd);
 		return;
 	}
-	
-	std::string new_file(change_extension(ibd, "new"));
-	if (file_exists(new_file)) {
-		msg("Fix DDL during prepare - move %s to %s", new_file.c_str(), ibd);
-		if (unlink(ibd)) {
-			msg("unlink failed (errno %d)\n", errno);
-			exit(EXIT_FAILURE);
-		}
-		rename_file(new_file, ibd);
-	}
 }
 
 /** Implement --prepare
@@ -5282,6 +5326,8 @@ xtrabackup_prepare_func(char** argv)
 	msg("mariabackup: cd to %s\n", xtrabackup_real_target_dir);
 
 	fil_path_to_mysql_datadir = ".";
+	xb_process_datadir("./", ".new", prepare_new_tablespaces);
+	
 	enumerate_ibd_files(fix_ddl_in_prepare);
 
 	int argc; for (argc = 0; argv[argc]; argc++) {}
