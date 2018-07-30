@@ -364,7 +364,6 @@ xtrabackup_add_datasink(ds_ctxt_t *ds)
 
 typedef void (*process_single_tablespace_func_t)(const char *dirname, const char *filname, bool is_remote);
 static dberr_t enumerate_ibd_files(process_single_tablespace_func_t callback);
-static void copy_tablespaces_created_during_backup();
 
 /* ======== Datafiles iterator ======== */
 struct datafiles_iter_t {
@@ -3831,7 +3830,6 @@ static bool xtrabackup_backup_low()
 			return false;
 		}
 	}
-	copy_tablespaces_created_during_backup();
 	return true;
 }
 
@@ -4302,7 +4300,7 @@ fail_before_log_copying_thread_start:
 
 
 /* This function copies tablespaces for tables created during backup. */
-void copy_tablespaces_created_during_backup()
+void copy_tablespaces_created_during_backup(void)
 {
 	std::map<std::string, ulint> name_to_id;
 
@@ -4311,15 +4309,35 @@ void copy_tablespaces_created_during_backup()
 	std::vector<std::string> dropped_tablespaces;
 	std::vector<fil_node_t *> recreated_tablespaces;
 
+
 	for (std::map<ulint,std::string>::iterator iter = tablespaces_in_backup.begin();
 		iter != tablespaces_in_backup.end(); ++iter) {
 		name_to_id[iter->second] = iter->first;
 	}
 
-	fil_close_all_files();
+	//  Close all datanodes, will rescan later.
+	std::vector<fil_node_t *> all_nodes;
+	datafiles_iter_t *it = datafiles_iter_new(fil_system);
+	if (!it)
+		return;
+	while (fil_node_t *node = datafiles_iter_next(it)) {
+		all_nodes.push_back(node);
+	}
+	for (size_t i = 0; i < all_nodes.size(); i++) {
+		fil_node_t *n = all_nodes[i];
+		if (n->space->id == 0)
+			continue;
+		fil_space_close(n->space->name);
+		fil_space_free(n->space->id, false);
+	}
+
+	// Find out which tablespaces were newly created, recreated, or renamed while
+	// backup was running.
+
+
 	/* Rescan datadir, load tablespaces that were created during backup.*/
 	dberr_t err = enumerate_ibd_files(xb_load_single_table_tablespace);
-	datafiles_iter_t *it = datafiles_iter_new(fil_system);
+	it = datafiles_iter_new(fil_system);
 	if (!it)
 		return;
 
