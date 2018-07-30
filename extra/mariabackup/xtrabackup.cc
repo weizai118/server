@@ -2705,6 +2705,8 @@ static void dbug_mariabackup_event(const char *event,const char *key)
 
 }
 #define DBUG_MARIABACKUP_EVENT(A, B) DBUG_EXECUTE_IF("mariabackup_events", dbug_mariabackup_event(A,B););
+#else
+#define DBUG_MARIABACKUP_EVENT(A,B)
 #endif
 
 /**************************************************************************
@@ -4323,12 +4325,14 @@ void copy_tablespaces_created_during_backup(void)
 	while (fil_node_t *node = datafiles_iter_next(it)) {
 		all_nodes.push_back(node);
 	}
+	datafiles_iter_free(it);
+
 	for (size_t i = 0; i < all_nodes.size(); i++) {
 		fil_node_t *n = all_nodes[i];
-		if (n->space->id == 0)
-			continue;
-		fil_space_close(n->space->name);
-		fil_space_free(n->space->id, false);
+		if (fil_is_user_tablespace_id(n->space->id)) {
+			fil_space_close(n->space->name);
+			fil_space_free(n->space->id, false);
+		}
 	}
 
 	// Find out which tablespaces were newly created, recreated, or renamed while
@@ -4336,7 +4340,8 @@ void copy_tablespaces_created_during_backup(void)
 
 
 	/* Rescan datadir, load tablespaces that were created during backup.*/
-	dberr_t err = enumerate_ibd_files(xb_load_single_table_tablespace);
+
+	enumerate_ibd_files(xb_load_single_table_tablespace);
 	it = datafiles_iter_new(fil_system);
 	if (!it)
 		return;
@@ -4413,7 +4418,7 @@ void copy_tablespaces_created_during_backup(void)
 
 	// mark tablespaces for drop.
 	for (size_t i = 0; i < dropped_tablespaces.size(); i++) {
-		backup_file_printf((dropped_tablespaces[i] + ".del").c_str(), "");
+		backup_file_printf((dropped_tablespaces[i] + ".del").c_str(), "%s","");
 	}
 
 }
@@ -5195,12 +5200,13 @@ static void fix_rename(const char *ibd)
 {
 	std::string ren_file(change_extension(ibd,"ren"));
 
-	char target_ibd[FN_REFLEN + 1] = { 0 };
+	char target_ibd[FN_REFLEN + 1];
 	FILE *f = fopen(ren_file.c_str(), "r");
 	if (!f) {
 		msg("Can not open %s", ren_file.c_str());
 	}
-	fread(target_ibd, 1, FN_REFLEN, f);
+	size_t len = fread(target_ibd, 1, FN_REFLEN, f);
+	target_ibd[len] = 0;
 	fclose(f);
 
 	std::string tmp_ibt;

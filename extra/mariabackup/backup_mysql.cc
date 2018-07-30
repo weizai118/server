@@ -1796,7 +1796,7 @@ mdl_lock_table(ulint space_id)
     lock_query << "SELECT 1 FROM " << full_table_name  << " LIMIT 0";
     msg_ts("Locking MDL for %s\n", full_table_name.c_str());
     if (mysql_query(mdl_con, lock_query.str().c_str())) {
-      msg_ts("Warning : locking MDL failed for space id %d, name %s\n", space_id, full_table_name.c_str());
+      msg_ts("Warning : locking MDL failed for space id %zu, name %s\n", space_id, full_table_name.c_str());
     } else {
       MYSQL_RES *r = mysql_store_result(mdl_con);
       mysql_free_result(r);
