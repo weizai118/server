@@ -4991,7 +4991,7 @@ static ibool prepare_new_tablespaces(
 	
 	os_offset_t new_size = n_pages * UNIV_PAGE_SIZE;
 	if (new_size) {
-		msg("Extending %s to the size %llu\n", new_file.c_str(),new_size);
+		msg("Extending %s to the size %llu\n", new_file.c_str(), (ulonglong)new_size);
 		if (!os_file_set_size(new_file.c_str(),
 			IF_WIN((HANDLE)_get_osfhandle(fd), fd), new_size)) {
 			msg("Could not extend %s", new_file.c_str());
