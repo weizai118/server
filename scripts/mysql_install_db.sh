@@ -346,7 +346,7 @@ else
   basedir="@prefix@"
   bindir="@bindir@"
   resolveip="$bindir/resolveip"
-  mysqld="@libexecdir@/mysqld"
+  mysqld="@sbindir@/mysqld"
   srcpkgdatadir="@pkgdatadir@"
   buildpkgdatadir="@pkgdatadir@"
   plugindir="@pkgplugindir@"

@@ -123,7 +123,7 @@ schedule new estimates for table and index statistics to be calculated.
 @param[in,out]	table	persistent or temporary table */
 void dict_stats_update_if_needed_func(dict_table_t* table)
 	MY_ATTRIBUTE((nonnull));
-# define dict_stats_update_if_needed(t, thd) dict_stats_update_if_needed(t)
+# define dict_stats_update_if_needed(t, thd) dict_stats_update_if_needed_func(t)
 #endif
 
 /*********************************************************************//**

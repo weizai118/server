@@ -4137,8 +4137,8 @@ make_join_statistics(JOIN *join, List<TABLE_LIST> &tables_list,
   int ref_changed;
   do
   {
-  more_const_tables_found:
     ref_changed = 0;
+  more_const_tables_found:
     found_ref=0;
 
     /*
@@ -4305,7 +4305,7 @@ make_join_statistics(JOIN *join, List<TABLE_LIST> &tables_list,
 	}
       }
     }
-  } while (join->const_table_map & found_ref && ref_changed);
+  } while (ref_changed);
  
   join->sort_by_table= get_sort_by_table(join->order, join->group_list,
                                          join->select_lex->leaf_tables,
@@ -8548,8 +8548,13 @@ bool JOIN_TAB::keyuse_is_valid_for_access_in_chosen_plan(JOIN *join,
   st_select_lex *sjm_sel= emb_sj_nest->sj_subq_pred->unit->first_select(); 
   for (uint i= 0; i < sjm_sel->item_list.elements; i++)
   {
-    if (sjm_sel->ref_pointer_array[i] == keyuse->val)
-      return true;
+    DBUG_ASSERT(sjm_sel->ref_pointer_array[i]->real_item()->type() == Item::FIELD_ITEM);
+    if (keyuse->val->real_item()->type() == Item::FIELD_ITEM)
+    {
+      Field *field = ((Item_field*)sjm_sel->ref_pointer_array[i]->real_item())->field;
+      if (field->eq(((Item_field*)keyuse->val->real_item())->field))
+        return true;
+    }
   }
   return false; 
 }
