@@ -171,6 +171,10 @@ public:
   virtual void print(String *str, enum_query_type query_type);
   void print_op(String *str, enum_query_type query_type);
   void print_args(String *str, uint from, enum_query_type query_type);
+  virtual const char * const sql_func_name()
+  {
+    return func_name();
+  }
   inline bool get_arg0_date(MYSQL_TIME *ltime, ulonglong fuzzy_date)
   {
     DBUG_ASSERT(!(fuzzy_date & TIME_TIME_ONLY));

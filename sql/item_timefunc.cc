@@ -2817,20 +2817,32 @@ bool Item_func_add_time::get_date(MYSQL_TIME *ltime, ulonglong fuzzy_date)
 }
 
 
-void Item_func_add_time::print(String *str, enum_query_type query_type)
+
+/**
+  Return the name of the actual SQL function.
+*/
+
+const char * const Item_func_add_time::sql_func_name()
 {
   if (is_date)
   {
     DBUG_ASSERT(sign > 0);
-    str->append(STRING_WITH_LEN("timestamp("));
+    return "timestamp";
   }
   else
   {
     if (sign > 0)
-      str->append(STRING_WITH_LEN("addtime("));
+      return "addtime";
     else
-      str->append(STRING_WITH_LEN("subtime("));
+      return "subtime";
   }
+}
+
+
+void Item_func_add_time::print(String *str, enum_query_type query_type)
+{
+  str->append(STRING_WITH_LEN(sql_func_name()));
+  str->append('(');
   args[0]->print(str, query_type);
   str->append(',');
   args[1]->print(str, query_type);
