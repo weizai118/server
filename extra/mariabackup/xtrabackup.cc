@@ -4411,7 +4411,7 @@ void copy_tablespaces_created_during_backup(void)
 				"in the future.\n",
 				n->space->name);
 		}
-		xtrabackup_copy_datafile(n, 0, dest_name.c_str(), do_full_copy ? ULONGLONG_MAX: UNIV_PAGE_SIZE);
+		xtrabackup_copy_datafile(n, 0, dest_name.c_str()/*, do_full_copy ? ULONGLONG_MAX:UNIV_PAGE_SIZE */);
 	}
 
 	// mark tablespaces for rename (--prepare will handle it correctly)
@@ -4990,7 +4990,6 @@ static ibool prepare_new_tablespaces(
 	}
 	os_offset_t n_pages = mach_read_from_4(
 		buf + FSP_HEADER_OFFSET + FSP_SIZE);
-	//ut_ad(n_pages >= FIL_IBD_FILE_INITIAL_SIZE);
 	
 	os_offset_t new_size = n_pages * UNIV_PAGE_SIZE;
 	if (new_size) {
@@ -5000,11 +4999,12 @@ static ibool prepare_new_tablespaces(
 			msg("Could not extend %s", new_file.c_str());
 			exit(EXIT_FAILURE);
 		}
-		close(fd);
 	}
+	close(fd);
 	std::string ibd_file = change_extension(new_file, "ibd");
 	if (access(ibd_file.c_str(), R_OK) == 0) {
-		if (unlink(ibd_file.c_str())) {
+		msg("Removing %s\n", ibd_file.c_str());
+		if (my_delete(ibd_file.c_str(), MYF(MY_WME))) {
 			msg("Can't remove %s, errno %d", ibd_file.c_str(), errno);
 			exit(EXIT_FAILURE);
 		}
