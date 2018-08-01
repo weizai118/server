@@ -179,7 +179,7 @@ void dict_stats_update_if_needed_func(dict_table_t* table)
 			if (thd && wsrep_on(thd) && wsrep_thd_is_BF(thd, 0)) {
 				WSREP_DEBUG("Avoiding background statistics"
 					    " calculation for table %s",
-					    table->name);
+					    table->name.m_name);
 				return;
 			}
 #endif /* WITH_WSREP */
