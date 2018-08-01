@@ -1126,13 +1126,13 @@ row_purge_record_func(
 	return(purged);
 }
 
-#ifdef UNIV_DEBUG
+#if defined UNIV_DEBUG || defined WITH_WSREP
 # define row_purge_record(node,undo_rec,thr,updated_extern)	\
 	row_purge_record_func(node,undo_rec,thr,updated_extern)
-#else /* UNIV_DEBUG */
+#else /* UNIV_DEBUG || WITH_WSREP */
 # define row_purge_record(node,undo_rec,thr,updated_extern)	\
 	row_purge_record_func(node,undo_rec,updated_extern)
-#endif /* UNIV_DEBUG */
+#endif /* UNIV_DEBUG || WITH_WSREP */
 
 /***********************************************************//**
 Fetches an undo log record and does the purge for the recorded operation.

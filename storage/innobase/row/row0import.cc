@@ -1274,11 +1274,12 @@ uncompressed:
 				? "ROW_FORMAT=COMPACT"
 				: "ROW_FORMAT=REDUNDANT";
 		}
-                ib_errf(thd, IB_LOG_LEVEL_ERROR, ER_TABLE_SCHEMA_MISMATCH,
-                        "Table flags don't match, server table has 0x%x"
-                        " and the meta-data file has 0x" ULINTPFx ";"
-                        " .cfg file uses %s",
-                        m_table->flags, m_flags, msg);
+
+		ib_errf(thd, IB_LOG_LEVEL_ERROR, ER_TABLE_SCHEMA_MISMATCH,
+			"Table flags don't match, server table has 0x%x"
+			" and the meta-data file has 0x" ULINTPFx ";"
+			" .cfg file uses %s",
+			m_table->flags, m_flags, msg);
 
 		return(DB_ERROR);
 	} else if (m_table->n_cols != m_n_cols) {
