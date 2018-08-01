@@ -546,42 +546,35 @@ void mdl_lock_all()
 
 }
 
-/** Check if the space id belongs to the table which name should
-be skipped based on the --tables, --tables-file and --table-exclude
-options.
+std::set<space_id_t> optimized_ddl_tablespaces;
+
+/** Callback whenever MLOG_INDEX_LOAD happens.
 @param[in]	space_id	space id to check
-@return true if the space id belongs to skip table/database list. */
-static bool backup_includes(space_id_t space_id)
+@return false */
+static bool optimized_ddl_callback(space_id_t space_id)
 {
-	datafiles_iter_t *it = datafiles_iter_new(fil_system);
-	if (!it)
-		return true;
+	fil_system_enter();
+	optimized_ddl_tablespaces.insert(space_id);
+	fil_system_exit();
+	return false;
+}
 
-	while (fil_node_t *node = datafiles_iter_next(it)){
-		if (space_id == 0
-		    || (node->space->id == space_id
-			&& !check_if_skip_table(node->space->name))) {
-
-			msg("mariabackup: Unsupported redo log detected "
-			"and it belongs to %s\n",
-			space_id ? node->name: "the InnoDB system tablespace");
-
-			msg("mariabackup: ALTER TABLE or OPTIMIZE TABLE "
-			"was being executed during the backup.\n");
-
-			if (!opt_lock_ddl_per_table) {
-				msg("mariabackup: Use --lock-ddl-per-table "
-				"parameter to lock all the table before "
-				"backup operation.\n");
-			}
-
-			datafiles_iter_free(it);
-			return false;
-		}
+static bool optimized_ddl_abort(space_id_t space_id)
+{
+	std::string name;
+	fil_system_enter();
+	if (tablespaces_in_backup.find(space_id) != tablespaces_in_backup.end()) {
+		name = tablespaces_in_backup[space_id];
+	}
+	fil_system_exit();
+	if (name.size()) {
+		msg("Optimized (without redo logging) DDL operation on tablespace %zu (%s)is encountered at the late phase of the backup."
+			"Aborting backup. You can set server innodb_log_optimize_ddl = OFF to avoid this error.\n",
+			space_id, name.c_str());
+		exit(EXIT_FAILURE);
 	}
 
-	datafiles_iter_free(it);
-	return true;
+	return false;
 }
 
 /* ======== Date copying thread context ======== */
@@ -4172,6 +4165,7 @@ fail_before_log_copying_thread_start:
 		goto fail_before_log_copying_thread_start;
 
 	log_copying_stop = os_event_create(0);
+	mlog_index_load_callback = optimized_ddl_callback;
 	os_thread_create(log_copying_thread, NULL, &log_copying_thread_id);
 
 	/* FLUSH CHANGED_PAGE_BITMAPS call */
@@ -4304,13 +4298,22 @@ fail_before_log_copying_thread_start:
 /* This function copies tablespaces for tables created during backup. */
 void copy_tablespaces_created_during_backup(void)
 {
+
 	std::map<std::string, ulint> name_to_id;
 
 	std::map<std::string, std::string> renamed_tablespaces;
 	std::vector<fil_node_t *> new_tablespaces;
 	std::vector<std::string> dropped_tablespaces;
-	std::vector<fil_node_t *> recreated_tablespaces;
 
+	/* From this point on, disable tracking of "optimized" ddl operations.
+	notification about optimized DDL will from now on cause backup to abort.
+	The redo log thread is still running, so it is theoretically possible
+	to get new CREATE INDEX notification, but the odds are low if FTWRL was
+	acquired (i.e -no-lock was not used).
+	*/
+	fil_system_enter();
+	mlog_index_load_callback = optimized_ddl_abort;
+	fil_system_exit();
 
 	for (std::map<ulint,std::string>::iterator iter = tablespaces_in_backup.begin();
 		iter != tablespaces_in_backup.end(); ++iter) {
@@ -4335,6 +4338,7 @@ void copy_tablespaces_created_during_backup(void)
 		}
 	}
 
+
 	// Find out which tablespaces were newly created, recreated, or renamed while
 	// backup was running.
 
@@ -4357,19 +4361,20 @@ void copy_tablespaces_created_during_backup(void)
 			continue;
 
 		if (tablespaces_in_backup.find(space->id) == tablespaces_in_backup.end()) {
-			if (name_to_id[space->name]) {
-				// Found tablespace with the same name, but different id.
-				// Table was DROPed and recreated,
-				recreated_tablespaces.push_back(node);
-			} else {
-				// No tablespace with the same name
-				// Table was CREATEd during backup.
-				new_tablespaces.push_back(node);
-			}
+			new_tablespaces.push_back(node);
 		} else if (tablespaces_in_backup[space->id] != space->name){
 			// Same space id after backup, but different name
 			// means there was a RENAME during backup.
-			renamed_tablespaces[tablespaces_in_backup[space->id]] = space->name;
+			if (optimized_ddl_tablespaces.find(space->id) != optimized_ddl_tablespaces.end()) {
+				// We need to copy the full tablespace, due to "optimized DDL"
+				dropped_tablespaces.push_back(tablespaces_in_backup[space->id]);
+				new_tablespaces.push_back(node);
+			} else {
+				renamed_tablespaces[tablespaces_in_backup[space->id]] = space->name;
+			}
+		}
+		else if (optimized_ddl_tablespaces.find(space->id) != optimized_ddl_tablespaces.end()) {
+			new_tablespaces.push_back(node);
 		}
 	}
 	datafiles_iter_free(it);
@@ -4395,20 +4400,21 @@ void copy_tablespaces_created_during_backup(void)
 			dropped_tablespaces.push_back(name);
 	}
 
+
 	// Copy new tablespaces
 	for (size_t i = 0; i < new_tablespaces.size(); i++) {
 		fil_node_t *n = new_tablespaces[i];
 		std::string dest_name(n->space->name);
 		dest_name.append(".new");
-		xtrabackup_copy_datafile(n, 0, dest_name.c_str(), UNIV_PAGE_SIZE);
-	}
-
-	// Re-copy recreated (DROP/CREATE under the same name) tablespaces
-	for(size_t i= 0; i< recreated_tablespaces.size(); i++) {
-		fil_node_t *n = recreated_tablespaces[i];
-		std::string dest_name(n->space->name);
-		dest_name.append(".new");
-		xtrabackup_copy_datafile(n, 0,  dest_name.c_str(), UNIV_PAGE_SIZE);
+		bool do_full_copy = optimized_ddl_tablespaces.find(n->space->id) != optimized_ddl_tablespaces.end();
+		if (do_full_copy) {
+			msg(
+				"Performing a full copy of the tablespace %s, because optimized (without redo logging) DDL operation"
+				"ran during backup. You can use set innodb_log_optimize_ddl=OFF to improve backup performance"
+				"in the future.\n",
+				n->space->name);
+		}
+		xtrabackup_copy_datafile(n, 0, dest_name.c_str(), do_full_copy ? ULONGLONG_MAX: UNIV_PAGE_SIZE);
 	}
 
 	// mark tablespaces for rename (--prepare will handle it correctly)
@@ -5694,7 +5700,7 @@ handle_options(int argc, char **argv, char ***argv_client, char ***argv_server)
 	srv_operation = SRV_OPERATION_RESTORE;
 
 	files_charset_info = &my_charset_utf8_general_ci;
-	check_if_backup_includes = backup_includes;
+
 
 	setup_error_messages();
 	sys_var_init();
